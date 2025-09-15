@@ -1,0 +1,27 @@
+[project]
+name = "misc_experiments"
+version = "0.1.0"
+description = ""
+requires-python = "==3.11.*"
+dependencies = [
+    "torch==2.4.0",
+    "torchvision==0.19.0",
+    "torchaudio==2.4.0",
+    "jax>=0.4.33,<0.4.38",
+    "jax_loop_utils[audio-video]",
+    "numpy",
+    "matplotlib",
+]
+
+[project.optional-dependencies]
+cuda = ["jax[cuda12]>=0.4.33"]
+
+
+[tool.uv]
+index-strategy = "unsafe-first-match"
+
+[[tool.uv.index]]
+url = "https://download.pytorch.org/whl/cu124"
+
+[[tool.uv.index]]
+url = "https://storage.googleapis.com/jax-releases/jax_cuda_releases.html"

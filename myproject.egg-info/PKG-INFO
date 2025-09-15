@@ -1,0 +1,11 @@
+Metadata-Version: 2.1
+Name: myproject
+Version: 0.1.0
+Requires-Python: ==3.11.*
+Requires-Dist: torch==2.4.0
+Requires-Dist: torchvision==0.19.0
+Requires-Dist: torchaudio==2.4.0
+Requires-Dist: jax<0.4.38,>=0.4.33
+Requires-Dist: jax_loop_utils[audio-video]
+Provides-Extra: cuda
+Requires-Dist: jax[cuda12]>=0.4.33; extra == "cuda"
