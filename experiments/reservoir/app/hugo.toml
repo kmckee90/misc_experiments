@@ -1,0 +1,22 @@
+baseURL = "https://yourusername.github.io/your-repo-name"
+languageCode = "en-us"
+title = "Spiking Neural Network Demo"
+
+[params]
+  description = "Interactive WebGPU-accelerated spiking neural network visualization"
+
+# Static files configuration
+[staticDir]
+  staticFiles = ["static", "dist"]
+
+# Build configuration for GitHub Pages
+[build]
+  publish = "dist"
+  command = "npm run build"
+
+# Headers for WebGPU support
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cross-Origin-Embedder-Policy = "require-corp"
+    Cross-Origin-Opener-Policy = "same-origin"

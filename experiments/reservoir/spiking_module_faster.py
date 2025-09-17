@@ -1,10 +1,39 @@
 import torch
 import torch.nn as nn
-
+from PIL import Image
+import numpy as np
 # Structure
 # Cortex > Cortical Reservoir > Lateral connections > Conv2d, LayerNorm
 #        > Cortical Input > Conv2dTranspose
 #        > Conv2d
+DEFAULT_DEVICE = "cuda"
+torch.set_default_device(DEFAULT_DEVICE)
+
+class PermutedConv2d(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, H, W, **conv_kwargs):
+        super().__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, **conv_kwargs)
+        N = H * W
+        self.register_buffer('perm', torch.randperm(N))
+        inv = torch.empty_like(self.perm)
+        inv[self.perm] = torch.arange(N)
+        self.register_buffer('inv', inv)
+        self.H, self.W = H, W
+
+    def _permute(self, x, perm):
+        B, C, H, W = x.shape
+        x = x.view(B, C, H * W)[:, :, perm]
+        return x.view(B, C, H, W)
+
+    def forward(self, x):
+        x = self._permute(x, self.perm)
+        x = self.conv(x)
+        return self._permute(x, self.inv)
+
+    def __getattr__(self, name):
+        if name != 'conv' and hasattr(self, 'conv') and hasattr(self.conv, name):
+            return getattr(self.conv, name)
+        return super().__getattr__(name)
 
 
 class CorticalReservoirSimpler(nn.Module):
@@ -21,6 +50,8 @@ class CorticalReservoirSimpler(nn.Module):
         self.lower_threshold = kwargs["lower_threshold"]
         self.exc_local_scale = kwargs["exc_local_scale"]
         self.inh_local_scale = kwargs["inh_local_scale"]
+        self.exc_global_scale = kwargs["exc_global_scale"]
+        self.inh_global_scale = kwargs["inh_global_scale"]
 
         k1 = kwargs["kernel_size_exc_local"]
         d1 = kwargs["kernel_dilation_exc_local"]
@@ -55,6 +86,46 @@ class CorticalReservoirSimpler(nn.Module):
         self.lat_inh.weight = nn.Parameter(self.lat_inh.weight / self.lat_inh.weight.sum())
         self.drop = nn.Dropout(kwargs["drop_prob"])
 
+
+        k1 = kwargs["kernel_size_exc_global"]
+        d1 = kwargs["kernel_dilation_exc_global"]
+        self.global_exc = PermutedConv2d(
+            in_channels=1,
+            out_channels=1,
+            kernel_size=k1,
+            stride=1,
+            padding=d1 * (k1 - 1) // 2,
+            bias=False,
+            padding_mode="circular",
+            groups=1,
+            dilation=d1,
+            H = kwargs["dim"],
+            W = kwargs["dim"],
+        )
+        self.global_exc.conv.weight = nn.Parameter(self.global_exc.conv.weight**0)
+        self.global_exc.conv.weight = nn.Parameter(self.global_exc.conv.weight / self.global_exc.conv.weight.sum())
+
+
+
+        k1 = kwargs["kernel_size_inh_global"]
+        d1 = kwargs["kernel_dilation_inh_global"]
+        self.global_inh = PermutedConv2d(
+            in_channels=1,
+            out_channels=1,
+            kernel_size=k1,
+            stride=1,
+            padding=d1 * (k1 - 1) // 2,
+            bias=False,
+            padding_mode="circular",
+            groups=1,
+            dilation=d1,
+            H = kwargs["dim"],
+            W = kwargs["dim"],
+        )
+        self.global_inh.conv.weight = nn.Parameter(self.global_inh.conv.weight**0)
+        self.global_inh.conv.weight = nn.Parameter(self.global_inh.conv.weight / self.global_inh.conv.weight.sum())
+
+
         self.register_buffer("V", torch.zeros(1, self.n_channel, self.dim, self.dim))
         self.register_buffer("S", self.V.clone())
 
@@ -75,7 +146,9 @@ class CorticalReservoirSimpler(nn.Module):
         return self.V
 
     def compute_lateral(self, s):
-        z = self.exc_local_scale * self.lat_exc(s)
+        z = self.exc_global_scale * self.global_exc(s)
+        z += self.exc_local_scale * self.lat_exc(s)
+        z += self.inh_global_scale * self.global_inh(s)
         z += self.inh_local_scale * self.lat_inh(s)
         return z
 
@@ -84,14 +157,14 @@ class CorticalInput(nn.Module):
     def __init__(self, input_dim, **kwargs):
         super().__init__()
         self.input_square_dim = kwargs["input_square_dim"]
-        self.internal_channels = 1
+        self.internal_input_channels = 1
         self.input_mask_prob_fine = kwargs["input_mask_prob_fine"]
         self.input_mask_prob_coarse = kwargs["input_mask_prob_coarse"]
         self.input_scale = kwargs["input_scale"]
         self.output_square_dim = kwargs["dim"]
-        self.square_embed = nn.Linear(input_dim, self.internal_channels * self.input_square_dim**2, bias=False)
+        self.square_embed = nn.Linear(input_dim, self.internal_input_channels * self.input_square_dim**2, bias=False)
         self.deconv = nn.ConvTranspose2d(
-            in_channels=self.internal_channels,
+            in_channels=self.internal_input_channels,
             out_channels=1,
             kernel_size=self.output_square_dim // self.input_square_dim,
             stride=self.output_square_dim // self.input_square_dim,
@@ -118,7 +191,7 @@ class CorticalInput(nn.Module):
 
     def forward(self, x):
         u = self.square_embed(x)
-        u = u.reshape(-1, self.internal_channels, self.input_square_dim, self.input_square_dim)
+        u = u.reshape(-1, self.internal_input_channels, self.input_square_dim, self.input_square_dim)
         u = u * self.input_mask_coarse
         u = self.deconv(u)
         u = self.input_scale * torch.tanh(u) * self.input_mask_fine
@@ -146,66 +219,89 @@ class Cortex(nn.Module):
 
 
 spiking_pars = {
-    "dim": 64,
-    "input_square_dim": 16,
-    "internal_channels": 1,
+    "dim": 256,
+
     "decay": 0.99,
     "firing_threshold": 0.99,
     "reset_point": -0.1,
-    "input_split": 0.1,
     "drop_prob": 0.5,
     "lower_threshold": -0.090,
-    "exc_local_scale": 6,
-    "inh_local_scale": -3,
-    "kernel_size_exc_local": 5,
+
+    "exc_local_scale": 6.0,
+    "exc_global_scale": 2.0,    
+    "inh_local_scale": -2.0,
+    "inh_global_scale": -0.1,
+
+    "kernel_size_exc_local": 7,
     "kernel_dilation_exc_local": 1,
+    "kernel_size_exc_global": 3,
+    "kernel_dilation_exc_global": 1,
     "kernel_size_inh_local": 5,
     "kernel_dilation_inh_local": 1,
+    "kernel_size_inh_global": 3,
+    "kernel_dilation_inh_global": 1,
+
+    "input_square_dim": 32,
     "input_mask_prob_fine": 0.5,
     "input_mask_prob_coarse": 0.25,
+    "internal_input_channels": 1,
+    "input_split": 0.1,
     "input_scale": 0.5,
+
 }
 
 
 if __name__ == "__main__":
-    import time
-
-    import pygame
+    # import time
+    # import pygame
 
     time_step = 0.05
-    scaled_size = (1024, 1024)
-    input_dim = 12
+    scaled_size = (512, 512)
+    input_dim = 24
     input_frequency = 1
 
-    pygame.init()
-    size = (spiking_pars["dim"], spiking_pars["dim"])
-    screen = pygame.display.set_mode(scaled_size)
-    pygame.display.set_caption("2D Reservoir animations")
+    # pygame.init()
+    # size = (spiking_pars["dim"], spiking_pars["dim"])
+    # screen = pygame.display.set_mode(scaled_size)
+    # pygame.display.set_caption("2D Reservoir animations")
 
     model = Cortex(
         input_dim,
         output_size=16,
         **spiking_pars,
-    ).to("cpu")
+    )
+    # data = torch.load("spiking_evo_data.pklk", map_location=DEFAULT_DEVICE)
 
-    data = torch.load("spiking_evo_data.pklk", map_location="cpu")
-
+    data = [torch.randn((256, 24)) for _ in range(80)]
+    
+    
     X = torch.cat(data[:10], 0)
+    frames = []
+    from tqdm import tqdm
     with torch.no_grad():
-        for i in range(10000):
-            print(i)
+        for i in tqdm(range(200), ncols=100):
             y = model(X[i] * (i < 300))
 
-            # Pygame visualization
+            # Visualization
             Vp = model.cortex_res.V.clone().cpu().squeeze()
             Vp[Vp < 0] = 0
             Sp = model.cortex_res.S.clone().cpu().float().squeeze()
-            Z = torch.stack([Vp * 0, Sp, Vp])
-
+            Z = torch.stack([Vp*0, Sp, Vp])
             frame = Z.permute(1, 2, 0).numpy()
             frame = frame * 255
-            surface = pygame.surfarray.make_surface(frame.swapaxes(0, 1))
-            scaled_surface = pygame.transform.scale(surface, scaled_size)
-            _ = screen.blit(scaled_surface, (0, 0))
-            pygame.display.flip()
-            time.sleep(time_step)
+            frame = frame.astype(np.uint8)
+            img = Image.fromarray(frame)
+            frames.append(img)
+            
+            # surface = pygame.surfarray.make_surface(frame.swapaxes(0, 1))
+            # scaled_surface = pygame.transform.scale(surface, scaled_size)
+            # _ = screen.blit(scaled_surface, (0, 0))
+            # pygame.display.flip()
+            # time.sleep(time_step)
+        frames[0].save(
+        "spiking.gif",
+        save_all=True,
+        append_images=frames[1:],
+        duration=4,  # milliseconds per frame
+        loop=0         # 0 = infinite loop
+        )

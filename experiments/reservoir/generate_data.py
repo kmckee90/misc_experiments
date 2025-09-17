@@ -3,11 +3,11 @@ from collections import OrderedDict
 import torch
 import torch.nn as nn
 
-from reservoirs.test_memory_length_function import MemoryLengthDiagnosticData, MLDD_Linear, MLDD_Nonlinear
+from test_memory_length_function import MemoryLengthDiagnosticData, MLDD_Linear, MLDD_Nonlinear
 
 ITERS = 80
 INTERVALS = (2, 4, 16, 32, 64, 128)
-INPUT_LEN = 4
+INPUT_LEN = 2
 SEQ_LEN = 256
 RNN_SIZE = 1024
 SEED = 1234

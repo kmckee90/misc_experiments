@@ -1,0 +1,5 @@
+*.gif
+*.pkl
+*.pyc
+*.onnx
+experiments/reservoir/app/node_modules
