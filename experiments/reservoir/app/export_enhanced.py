@@ -40,14 +40,15 @@ class EnhancedSpiking(nn.Module):
         lateral += inh_local * self.inh_local_conv(S0)
 
         # Global connections (simplified as average pooling to avoid permutation complexity)
-        if exc_global != 0 or inh_global != 0:
-            # Global average with small kernel to simulate global connectivity
-            global_kernel_size = 3
-            pad = global_kernel_size // 2
-            S0_pad = torch.nn.functional.pad(S0, (pad, pad, pad, pad), mode='circular')
-            global_signal = torch.nn.functional.avg_pool2d(S0_pad, global_kernel_size, stride=1, padding=0)
-            lateral += exc_global * global_signal
-            lateral += inh_global * global_signal
+        lateral += exc_global * S0.mean() - 0.0 * inh_global
+        # if exc_global != 0 or inh_global != 0:
+        #     # Global average with small kernel to simulate global connectivity
+        #     global_kernel_size = 3
+        #     pad = global_kernel_size // 2
+        #     S0_pad = torch.nn.functional.pad(S0, (pad, pad, pad, pad), mode='circular')
+        #     global_signal = torch.nn.functional.avg_pool2d(S0_pad, global_kernel_size, stride=1, padding=0)
+        #     lateral += exc_global * global_signal
+        #     lateral += inh_global * global_signal
 
         # Apply lateral interactions where voltage is above lower threshold
         active = V > lower_thr
@@ -83,7 +84,7 @@ def export_enhanced_onnx():
     H, W = 256, 256
 
     # State tensors
-    V0 = torch.zeros(1, 1, H, W)
+    V0 = torch.randn(1, 1, H, W) * 0.25
     S0 = torch.zeros(1, 1, H, W)
     U = torch.zeros(1, 1, H, W)
 
@@ -105,7 +106,7 @@ def export_enhanced_onnx():
     torch.onnx.export(
         model,
         example_inputs,
-        "spiking_step_enhanced.onnx",
+        "public/spiking_step_enhanced.onnx",
         input_names=["V0", "S0", "U", "decay", "thr", "reset", "input_split",
                      "exc_local", "exc_global", "inh_local", "inh_global", "drop_prob", "lower_thr"],
         output_names=["V1", "S1", "Y"],

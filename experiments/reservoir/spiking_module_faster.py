@@ -146,10 +146,11 @@ class CorticalReservoirSimpler(nn.Module):
         return self.V
 
     def compute_lateral(self, s):
-        z = self.exc_global_scale * self.global_exc(s)
-        z += self.exc_local_scale * self.lat_exc(s)
-        z += self.inh_global_scale * self.global_inh(s)
+        # z = self.exc_global_scale * self.global_exc(s)
+        z = self.exc_local_scale * self.lat_exc(s)
+        # z += self.inh_global_scale * self.global_inh(s)
         z += self.inh_local_scale * self.lat_inh(s)
+        z += 2*s.mean()
         return z
 
 
@@ -229,7 +230,7 @@ spiking_pars = {
 
     "exc_local_scale": 6.0,
     "exc_global_scale": 2.0,    
-    "inh_local_scale": -2.0,
+    "inh_local_scale": -1.0,
     "inh_global_scale": -0.1,
 
     "kernel_size_exc_local": 7,

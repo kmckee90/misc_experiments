@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import * as ort from "onnxruntime-web";
 
 export default function SpikingSnnDemo() {
-  const [resolution, setResolution] = useState(256);
+  const [resolution, setResolution] = useState(512);
   const [session, setSession] = useState(null);
   const [ready, setReady] = useState(false);
   const [running, setRunning] = useState(true);
@@ -26,23 +26,24 @@ export default function SpikingSnnDemo() {
   // Resize state tensors when resolution changes
   useEffect(() => {
     const size = H * W;
-    V.current = new Float32Array(size);
+//    V.current = new Float32Array(size);
+    V.current = new Float32Array(size).map(() => (2.0*Math.random() - 1.0) * 0.1);
     S.current = new Float32Array(size);
     U.current = new Float32Array(size);
   }, [H, W]);
 
   // Parameters from spiking_pars (exact defaults)
-  const [decay, setDecay] = useState(0.99);
+  const [decay, setDecay] = useState(0.975);
   const [firingThreshold, setFiringThreshold] = useState(0.9);
   const [resetPoint, setResetPoint] = useState(-1);
-  const [dropProb, setDropProb] = useState(0.6);
+  const [dropProb, setDropProb] = useState(0.35);
   const [lowerThreshold, setLowerThreshold] = useState(-0.9);
 
-  const [excLocalScale, setExcLocalScale] = useState(6.0);
-  const [inhLocalScale, setInhLocalScale] = useState(-1.0);
+  const [excLocalScale, setExcLocalScale] = useState(5.0);
+  const [inhLocalScale, setInhLocalScale] = useState(-2.0);
+  const [excGlobalScale, setExcGlobalScale] = useState(1.75);
 
   // Fixed values for removed controls
-  const excGlobalScale = 0;
   const inhGlobalScale = 0;
   const inputSplit = 0.1;
 
@@ -190,7 +191,8 @@ export default function SpikingSnnDemo() {
         const Y  = out.Y  ?? V1;
 
         // Update state
-        V.current.set(V1.data);
+        //V.current.set(V1.data);
+        V.current.set(V1.data.map(v => v + (2.0*Math.random() - 1.0) * 0.001));
         S.current.set(S1.data);
 
         // Visualize with color mapping: voltage in blue/cyan, spikes in green
@@ -244,14 +246,14 @@ export default function SpikingSnnDemo() {
 
   // Initialize some activity for first run (256x256 only)
   const initializeActivity = useCallback(() => {
-    if (resolution !== 256 || hasInitialActivity) return;
+    if (resolution !== 512 || hasInitialActivity) return;
 
     // Create irregular pattern using deterministic "random" positions
     const positions = [
       [64, 64], [128, 128], [192, 192], [96, 160], [160, 96],
       [48, 180], [180, 48], [120, 80], [80, 200], [200, 120],
       [72, 144], [144, 72], [36, 216], [216, 36], [108, 36]
-    ];
+    ].map(([x, y]) => [x * 2, y * 2]);
 
     positions.forEach(([x, y]) => {
       stampBrush(x, y);
@@ -423,6 +425,10 @@ export default function SpikingSnnDemo() {
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                 <label style={{ fontSize: "11px", fontWeight: "500", minWidth: "80px", color: "#ccc" }}>Local Inhibition</label>
                 <input type="number" step="0.1" value={inhLocalScale} onChange={(e) => setInhLocalScale(parseFloat(e.target.value) || 0)} style={{ width: "80px", padding: "2px 4px", fontSize: "11px", border: "1px solid #555", borderRadius: "2px", backgroundColor: "#333", color: "#e0e0e0" }} />
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <label style={{ fontSize: "11px", fontWeight: "500", minWidth: "80px", color: "#ccc" }}>Global Excitation</label>
+                <input type="number" step="0.1" value={excGlobalScale} onChange={(e) => setExcGlobalScale(parseFloat(e.target.value) || 0)} style={{ width: "80px", padding: "2px 4px", fontSize: "11px", border: "1px solid #555", borderRadius: "2px", backgroundColor: "#333", color: "#e0e0e0" }} />
               </div>
             </div>
           </div>
